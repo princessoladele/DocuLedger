@@ -1,0 +1,77 @@
+import { DocumentSchemaDefinition } from "../schema-types";
+
+export const logisticsBillOfLading: DocumentSchemaDefinition = {
+  key: "logistics.bill-of-lading",
+  name: "Bill of Lading",
+  industry: "LOGISTICS",
+  description: "Extracts shipment and carrier details from a bill of lading.",
+  version: 1,
+  confidenceThreshold: 0.85,
+  fields: [
+    {
+      name: "bol_number",
+      label: "Bill of Lading Number",
+      type: "string",
+      required: true,
+      aliases: ["Bill of Lading Number", "BOL Number", "B/L No."],
+      pattern: "^[A-Za-z0-9-]{4,30}$",
+    },
+    {
+      name: "carrier_name",
+      label: "Carrier",
+      type: "string",
+      required: true,
+      aliases: ["Carrier", "Carrier Name"],
+    },
+    {
+      name: "shipper_name",
+      label: "Shipper",
+      type: "string",
+      required: true,
+      aliases: ["Shipper", "Shipper Name", "Ship From"],
+    },
+    {
+      name: "consignee_name",
+      label: "Consignee",
+      type: "string",
+      required: true,
+      aliases: ["Consignee", "Ship To", "Deliver To"],
+    },
+    {
+      name: "origin",
+      label: "Origin",
+      type: "address",
+      required: true,
+      aliases: ["Origin", "Point of Origin", "Pickup Location"],
+    },
+    {
+      name: "destination",
+      label: "Destination",
+      type: "address",
+      required: true,
+      aliases: ["Destination", "Delivery Location"],
+    },
+    {
+      name: "ship_date",
+      label: "Ship Date",
+      type: "date",
+      required: true,
+      aliases: ["Ship Date", "Date Shipped", "Pickup Date"],
+    },
+    {
+      name: "weight",
+      label: "Total Weight",
+      type: "string",
+      required: false,
+      aliases: ["Weight", "Total Weight", "Gross Weight"],
+    },
+    {
+      name: "freight_charges",
+      label: "Freight Charges",
+      type: "currency",
+      required: false,
+      aliases: ["Freight Charges", "Charges"],
+      pattern: "^\\$?[0-9][0-9,]*(\\.[0-9]{2})?$",
+    },
+  ],
+};

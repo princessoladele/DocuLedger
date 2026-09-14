@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doculedger-worker
+  namespace: doculedger
+  labels: { app: doculedger-worker }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: doculedger-worker }
+  template:
+    metadata:
+      labels: { app: doculedger-worker }
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/doculedger-worker:latest
+          envFrom:
+            - secretRef: { name: doculedger-secrets }
+          env:
+            - { name: NODE_ENV, value: "production" }
+            - { name: WORKER_CONCURRENCY, value: "4" }
+          resources:
+            # OCR is CPU-bound; size generously relative to the API.
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "1Gi" }

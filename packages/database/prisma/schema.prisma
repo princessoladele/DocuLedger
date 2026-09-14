@@ -1,0 +1,365 @@
+// DocuLedger core data model.
+// Multi-tenant: almost every row is scoped by organizationId. Application-layer
+// guards (see apps/api/src/common/guards) enforce tenant isolation on every query;
+// this schema encodes the foreign keys and indexes that make those queries fast.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy, identity & access
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(FREE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  apiKeys         ApiKey[]
+  documents       Document[]
+  documentSchemas DocumentSchema[]
+  auditLogs       AuditLog[]
+  webhooks        Webhook[]
+
+  @@map("organizations")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  BUSINESS
+  ENTERPRISE
+}
+
+model User {
+  id             String    @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  passwordHash   String
+  name           String
+  role           Role      @default(MEMBER)
+  isActive       Boolean   @default(true)
+  mfaSecret      String?
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  refreshTokens   RefreshToken[]
+  uploadedDocs    Document[]     @relation("UploadedBy")
+  reviewedDocs    Document[]     @relation("ReviewedBy")
+  reviewTasks     ReviewTask[]
+  auditLogs       AuditLog[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+// Ordered from least to most privileged for numeric role comparisons in guards.
+enum Role {
+  MEMBER    // upload documents, view own uploads
+  REVIEWER  // + review/approve/reject queued documents
+  ADMIN     // + manage schemas, users, api keys, webhooks
+  OWNER     // + billing, org deletion, ownership transfer
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  userAgent String?
+  ipAddress String?
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model ApiKey {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  keyPrefix      String   // first 8 chars, shown in UI for identification
+  hashedKey      String   @unique // sha256 of the full secret
+  role           Role     @default(MEMBER)
+  scopes         String[] @default([])
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Configurable industry schemas
+// ---------------------------------------------------------------------------
+
+model DocumentSchema {
+  id                  String   @id @default(uuid())
+  organizationId      String?  // null = built-in global template available to all orgs
+  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  industry             Industry
+  key                  String   // stable machine key, e.g. "real-estate.lease-agreement"
+  name                 String
+  version              Int      @default(1)
+  description          String?
+  fields               Json     // FieldDefinition[] - see packages/shared/src/schema-types.ts
+  confidenceThreshold  Float    @default(0.85)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  documents Document[]
+
+  @@unique([organizationId, key, version])
+  @@index([industry])
+  @@map("document_schemas")
+}
+
+enum Industry {
+  REAL_ESTATE
+  HEALTHCARE
+  FINANCE
+  LOGISTICS
+  COMPLIANCE
+  GENERAL
+}
+
+// ---------------------------------------------------------------------------
+// Documents & the extraction pipeline
+// ---------------------------------------------------------------------------
+
+model Document {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  schemaId       String?
+  schema         DocumentSchema? @relation(fields: [schemaId], references: [id])
+  industry       Industry @default(GENERAL)
+
+  uploadedById   String
+  uploadedBy     User     @relation("UploadedBy", fields: [uploadedById], references: [id])
+  reviewedById   String?
+  reviewedBy     User?    @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  originalFilename String
+  mimeType         String
+  sizeBytes        Int
+  storageKey       String   // key/path in the object store (encrypted at rest)
+  sha256           String   // hash of the raw uploaded bytes, computed on ingest
+
+  status         DocumentStatus @default(UPLOADED)
+  source         DocumentSource @default(UPLOAD)
+  failureReason  String?
+  attempts       Int      @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  extractions    ExtractionResult[]
+  validationIssues ValidationIssue[]
+  reviewTasks    ReviewTask[]
+  processingJobs ProcessingJob[]
+  anchorRecords  AnchorRecord[]
+  auditLogs      AuditLog[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+  @@map("documents")
+}
+
+enum DocumentStatus {
+  UPLOADED       // file stored, awaiting queue pickup
+  QUEUED         // OCR job enqueued
+  PROCESSING     // OCR + extraction running
+  VALIDATING     // schema validation running
+  NEEDS_REVIEW   // validation failed or confidence below threshold
+  REVIEWED       // human confirmed the extracted data
+  ANCHORED       // fingerprint anchored on Stellar
+  FAILED         // exhausted retries; sits in the error queue
+  ARCHIVED
+}
+
+enum DocumentSource {
+  UPLOAD
+  API
+  EMAIL
+}
+
+model ExtractionResult {
+  id               String   @id @default(uuid())
+  documentId       String
+  document         Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  engine           String   // e.g. "tesseract@5"
+  rawText          String
+  fields           Json     // ExtractedField[]: {name, value, confidence, normalized}
+  overallConfidence Float
+  durationMs       Int
+  createdAt        DateTime @default(now())
+
+  @@index([documentId])
+  @@map("extraction_results")
+}
+
+model ValidationIssue {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  field      String
+  code       String   // e.g. "REQUIRED_FIELD_MISSING", "LOW_CONFIDENCE", "PATTERN_MISMATCH"
+  message    String
+  severity   IssueSeverity @default(ERROR)
+  createdAt  DateTime @default(now())
+
+  @@index([documentId])
+  @@map("validation_issues")
+}
+
+enum IssueSeverity {
+  WARNING
+  ERROR
+}
+
+model ReviewTask {
+  id             String   @id @default(uuid())
+  documentId     String
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  assignedToId   String?
+  assignedTo     User?    @relation(fields: [assignedToId], references: [id])
+  status         ReviewStatus @default(PENDING)
+  correctedFields Json?   // human-corrected field values, merged back on approval
+  reviewerNotes  String?
+  createdAt      DateTime @default(now())
+  resolvedAt     DateTime?
+
+  @@index([documentId])
+  @@index([status])
+  @@map("review_tasks")
+}
+
+enum ReviewStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+}
+
+// Durable record of each queue attempt, independent of BullMQ's own retained
+// job data, so the dashboard/error-queue view survives Redis eviction.
+model ProcessingJob {
+  id          String   @id @default(uuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  queue       String
+  status      JobStatus @default(PENDING)
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([documentId])
+  @@index([status])
+  @@map("processing_jobs")
+}
+
+enum JobStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+// ---------------------------------------------------------------------------
+// Stellar / Soroban anchoring
+// ---------------------------------------------------------------------------
+
+model AnchorRecord {
+  id              String   @id @default(uuid())
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  fingerprint     String   // sha256 of canonicalized extracted data (not the raw file)
+  network         String   // "testnet" | "futurenet" | "public"
+  contractId      String?
+  stellarTxHash   String?
+  ledgerSequence  Int?
+  status          AnchorStatus @default(PENDING)
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  confirmedAt     DateTime?
+
+  @@index([documentId])
+  @@index([fingerprint])
+  @@map("anchor_records")
+}
+
+enum AnchorStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Audit & integrations
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorId        String?
+  actor          User?    @relation(fields: [actorId], references: [id])
+  actorType      ActorType @default(USER)
+  action         String   // e.g. "document.upload", "review.approve", "apikey.revoke"
+  resourceType   String
+  resourceId     String?
+  documentId     String?
+  document       Document? @relation(fields: [documentId], references: [id])
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
+
+enum ActorType {
+  USER
+  API_KEY
+  SYSTEM
+}
+
+model Webhook {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  url            String
+  secret         String
+  events         String[] // e.g. ["document.needs_review", "document.anchored"]
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@map("webhooks")
+}

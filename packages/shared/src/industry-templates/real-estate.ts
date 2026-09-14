@@ -1,0 +1,70 @@
+import { DocumentSchemaDefinition } from "../schema-types";
+
+export const realEstateLeaseAgreement: DocumentSchemaDefinition = {
+  key: "real-estate.lease-agreement",
+  name: "Residential Lease Agreement",
+  industry: "REAL_ESTATE",
+  description: "Extracts key terms from a residential lease or rental agreement.",
+  version: 1,
+  confidenceThreshold: 0.85,
+  fields: [
+    {
+      name: "landlord_name",
+      label: "Landlord / Lessor Name",
+      type: "string",
+      required: true,
+      aliases: ["Landlord", "Lessor", "Property Owner"],
+    },
+    {
+      name: "tenant_name",
+      label: "Tenant / Lessee Name",
+      type: "string",
+      required: true,
+      aliases: ["Tenant", "Lessee", "Renter"],
+    },
+    {
+      name: "property_address",
+      label: "Property Address",
+      type: "address",
+      required: true,
+      aliases: ["Property Address", "Premises", "Rental Address"],
+    },
+    {
+      name: "monthly_rent",
+      label: "Monthly Rent",
+      type: "currency",
+      required: true,
+      aliases: ["Monthly Rent", "Rent Amount", "Rent"],
+      pattern: "^\\$?[0-9][0-9,]*(\\.[0-9]{2})?$",
+    },
+    {
+      name: "security_deposit",
+      label: "Security Deposit",
+      type: "currency",
+      required: true,
+      aliases: ["Security Deposit", "Deposit"],
+      pattern: "^\\$?[0-9][0-9,]*(\\.[0-9]{2})?$",
+    },
+    {
+      name: "lease_start_date",
+      label: "Lease Start Date",
+      type: "date",
+      required: true,
+      aliases: ["Lease Start", "Commencement Date", "Start Date"],
+    },
+    {
+      name: "lease_end_date",
+      label: "Lease End Date",
+      type: "date",
+      required: true,
+      aliases: ["Lease End", "Termination Date", "End Date"],
+    },
+    {
+      name: "lease_term_months",
+      label: "Lease Term (months)",
+      type: "number",
+      required: false,
+      aliases: ["Lease Term", "Term"],
+    },
+  ],
+};

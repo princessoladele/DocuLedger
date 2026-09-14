@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build packages
+        run: |
+          pnpm --filter @doculedger/shared build
+          pnpm --filter @doculedger/stellar build
+          pnpm --filter @doculedger/api build
+          pnpm --filter @doculedger/worker build
+          pnpm --filter @doculedger/web build
+
+      - name: Test
+        run: pnpm test
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32v1-none }
+
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: "contracts/soroban-attestation" }
+
+      - name: Test Soroban contract
+        working-directory: contracts/soroban-attestation
+        run: cargo test

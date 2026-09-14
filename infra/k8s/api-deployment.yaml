@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doculedger-api
+  namespace: doculedger
+  labels: { app: doculedger-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: doculedger-api }
+  template:
+    metadata:
+      labels: { app: doculedger-api }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-org/doculedger-api:latest
+          ports: [{ containerPort: 4000 }]
+          envFrom:
+            - secretRef: { name: doculedger-secrets }
+          env:
+            - { name: PORT, value: "4000" }
+            - { name: NODE_ENV, value: "production" }
+            - { name: CORS_ORIGINS, value: "https://app.yourdomain.com" }
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+          readinessProbe:
+            httpGet: { path: /health, port: 4000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: 4000 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: doculedger-api
+  namespace: doculedger
+spec:
+  selector: { app: doculedger-api }
+  ports: [{ port: 80, targetPort: 4000 }]
