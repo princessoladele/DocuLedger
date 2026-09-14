@@ -16,3 +16,4 @@ contracts/soroban-attestation/target/
 contracts/soroban-attestation/.soroban/
 *.wasm
 .pnpm-store/
+contracts/soroban-attestation/test_snapshots/
