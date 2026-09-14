@@ -124,4 +124,5 @@ cd contracts/soroban-attestation && cargo test   # Soroban contract tests
 - [docs/STELLAR.md](docs/STELLAR.md) — how and why anchoring works, mock vs. live Testnet
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker Compose and Kubernetes deployment
 - [contracts/soroban-attestation/README.md](contracts/soroban-attestation/README.md) — the on-chain contract
+- [ISSUES.md](ISSUES.md) — scoped, sprint-sized issues for contributors
 - Live API reference: `GET /docs` on a running API instance (OpenAPI/Swagger)
